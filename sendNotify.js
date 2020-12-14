@@ -74,13 +74,14 @@ if (process.env.IGOT_PUSH_KEY) {
 async function sendNotify(text, desp, params = {}) {
   //提供五种通知
   await serverNotify(text, desp);
+  text = text.match(/.*?(?=\s?-)/g) ? text.match(/.*?(?=\s?-)/g)[0] : text;
   await BarkNotify(text, desp, params);
   await tgBotNotify(text, desp);
   await ddBotNotify(text, desp);
   await iGotNotify(text, desp, params);
 }
 
-function serverNotify(text, desp) {
+function serverNotify(text, desp, timeout = 2100) {
   return  new Promise(resolve => {
     if (SCKEY) {
       //微信server酱推送通知一个\n不会换行，需要两个\n才能换行，故做此替换
@@ -92,25 +93,29 @@ function serverNotify(text, desp) {
           'Content-Type': 'application/x-www-form-urlencoded'
         }
       }
-      $.post(options, (err, resp, data) => {
-        try {
-          if (err) {
-            console.log('\n发送通知调用API失败！！\n')
-            console.log(err);
-          } else {
-            data = JSON.parse(data);
-            if (data.errno === 0) {
-              console.log('\nserver酱发送通知消息成功\n')
-            } else if (data.errno === 1024) {
-              console.log('\nPUSH_KEY 错误\n')
+      setTimeout(() => {
+        $.post(options, (err, resp, data) => {
+          try {
+            if (err) {
+              console.log('\n发送通知调用API失败！！\n')
+              console.log(err);
+            } else {
+              data = JSON.parse(data);
+              if (data.errno === 0) {
+                console.log('\nserver酱发送通知消息成功\n')
+              } else if (data.errno === 1024) {
+                console.log('\nPUSH_KEY 错误\n')
+              } else {
+                console.log(`server酱发送通知消息异常\n${JSON.stringify(data)}`)
+              }
             }
+          } catch (e) {
+            $.logErr(e, resp);
+          } finally {
+            resolve(data);
           }
-        } catch (e) {
-          $.logErr(e, resp);
-        } finally {
-          resolve(data);
-        }
-      })
+        })
+      }, timeout)
     } else {
       console.log('\n您未提供server酱的SCKEY，取消微信推送消息通知\n');
       resolve()
@@ -123,6 +128,9 @@ function BarkNotify(text, desp, params={}) {
     if (BARK_PUSH) {
       const options = {
         url: `${BARK_PUSH}/${encodeURIComponent(text)}/${encodeURIComponent(desp)}?sound=${BARK_SOUND}&${querystring.stringify(params)}`,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
       }
       $.get(options, (err, resp, data) => {
         try {
@@ -155,10 +163,22 @@ function tgBotNotify(text, desp) {
     if (TG_BOT_TOKEN && TG_USER_ID) {
       const options = {
         url: `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`,
-        body: `chat_id=${TG_USER_ID}&text=${text}\n\n${desp}`,
+        body: `chat_id=${TG_USER_ID}&text=${text}\n\n${desp}&disable_web_page_preview=true`,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
         }
+      }
+      if (process.env.TG_PROXY_HOST && process.env.TG_PROXY_PORT) {
+        const tunnel = require("tunnel");
+        const agent = {
+          https: tunnel.httpsOverHttp({
+            proxy: {
+              host: process.env.TG_PROXY_HOST,
+              port: process.env.TG_PROXY_PORT * 1
+            }
+          })
+        }
+        Object.assign(options, { agent })
       }
       $.post(options, (err, resp, data) => {
         try {
@@ -263,7 +283,7 @@ function iGotNotify(text, desp, params={}){
         console.log('\n您所提供的IGOT_PUSH_KEY无效\n')
         resolve()
         return 
-      } 
+      }
       const options = {
         url: `https://push.hellyw.com/${IGOT_PUSH_KEY.toLowerCase()}`,
         body: `title=${text}&content=${desp}&${querystring.stringify(params)}`,
@@ -299,8 +319,6 @@ function iGotNotify(text, desp, params={}){
 
 module.exports = {
   sendNotify,
-  BarkNotify,
-  iGotNotify,
   SCKEY,
   BARK_PUSH,
   TG_BOT_TOKEN,
